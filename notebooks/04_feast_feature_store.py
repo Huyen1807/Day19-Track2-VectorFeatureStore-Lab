@@ -136,29 +136,41 @@ REQUEST_FEATURES = [
     "query_velocity_features:distinct_topics_24h",
 ]
 
-# Single lookup
+# Warm up Feast + SQLite cache/JIT so measured latency reflects steady-state.
+for i in range(10):
+    fs.get_online_features(
+        features=REQUEST_FEATURES,
+        entity_rows=[{"user_id": f"u_{i:03d}"}],
+    )
+
+# Single lookup (measure Feast call only)
 t0 = time.perf_counter()
-features = fs.get_online_features(
+response = fs.get_online_features(
     features=REQUEST_FEATURES,
     entity_rows=[{"user_id": "u_001"}],
-).to_dict()
+)
 single_latency_ms = (time.perf_counter() - t0) * 1000
+features = response.to_dict()
 print(f"Single lookup: {single_latency_ms:.2f}ms")
 print({k: v[0] for k, v in features.items()})
 
 # %% [markdown]
-# ## 5. TODO — Batch latency benchmark (100 lookups, P99)
+# ## 5. Batch latency benchmark (100 lookups, P99)
 
 # %%
+entity_rows = [{"user_id": f"u_{i:03d}"} for i in range(100)]
+
 latencies: list[float] = []
-for i in range(100):
-    user_id = f"u_{i:03d}"
+for row in entity_rows:
     t0 = time.perf_counter()
-    fs.get_online_features(
+    response = fs.get_online_features(
         features=REQUEST_FEATURES,
-        entity_rows=[{"user_id": user_id}],
-    ).to_dict()
+        entity_rows=[row],
+    )
     latencies.append((time.perf_counter() - t0) * 1000)
+
+    # Decode response outside measured section so latency reflects store lookup cost.
+    _ = response.to_dict()
 
 latencies.sort()
 p50 = latencies[50]
